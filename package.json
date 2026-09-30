@@ -1,0 +1,17 @@
+{
+  "name": "railway-interlocking-sim",
+  "version": "1.0.0",
+  "private": true,
+  "description": "小型铁路站场培训用 Web 进路联锁推演台",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "express": "^4.21.2"
+  }
+}

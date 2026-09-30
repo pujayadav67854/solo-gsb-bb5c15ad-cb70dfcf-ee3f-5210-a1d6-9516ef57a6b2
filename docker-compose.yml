@@ -1,0 +1,20 @@
+services:
+  interlocking:
+    build: .
+    image: railway-interlocking-sim:latest
+    container_name: railway-interlocking
+    ports:
+      - "3000:3000"
+    environment:
+      # 监听端口（容器内）
+      PORT: "3000"
+      # SQLite 数据库文件位置（已挂载命名卷，数据本地持久保存）
+      DB_PATH: /data/interlocking.db
+      # 管理员口令：留空 = 不启用；设置后管理员页写操作需要该口令
+      ADMIN_TOKEN: ""
+    volumes:
+      - interlocking-data:/data
+    restart: unless-stopped
+
+volumes:
+  interlocking-data:

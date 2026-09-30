@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>铁路站场进路联锁推演台</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #1a1d24; color: #e6e8ec; }
+  header { background: #22262f; padding: 10px 18px; display: flex; align-items: center; gap: 16px; border-bottom: 2px solid #3a3f4b; }
+  header h1 { font-size: 18px; margin: 0; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button { background: #2d323d; color: #cfd3da; border: 1px solid #444a57; padding: 6px 18px; cursor: pointer; border-radius: 4px; font-size: 14px; }
+  .tabs button.active { background: #3d7cdd; color: #fff; border-color: #3d7cdd; }
+  .operator-bar { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: 13px; }
+  .operator-bar input { background: #1a1d24; border: 1px solid #444a57; color: #e6e8ec; padding: 4px 8px; border-radius: 3px; width: 110px; }
+  main { display: flex; height: calc(100vh - 54px); }
+  .board { flex: 1; position: relative; overflow: hidden; }
+  svg { width: 100%; height: 100%; display: block; cursor: default; }
+  .panel { width: 380px; min-width: 340px; background: #22262f; border-left: 1px solid #3a3f4b; overflow-y: auto; padding: 14px; }
+  .panel h2 { font-size: 15px; margin: 0 0 10px; border-left: 3px solid #3d7cdd; padding-left: 8px; }
+  .panel h3 { font-size: 13px; margin: 16px 0 6px; color: #9fa6b2; }
+  .card { background: #2a2f3a; border: 1px solid #3a3f4b; border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+  .card.selected { border-color: #3d7cdd; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+  label { font-size: 12px; color: #9fa6b2; min-width: 52px; }
+  input[type=text], input[type=number], select { background: #1a1d24; border: 1px solid #444a57; color: #e6e8ec; padding: 5px 8px; border-radius: 3px; font-size: 13px; }
+  input[type=text] { flex: 1; min-width: 0; }
+  button.act { background: #3d7cdd; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  button.act:hover { background: #4d8cf0; }
+  button.danger { background: #b0463a; }
+  button.danger:hover { background: #c75548; }
+  button.ghost { background: #3a3f4b; color: #d6d9df; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; margin-right: 4px; }
+  .tag.free { background: #244c2f; color: #7ee29a; }
+  .tag.occ { background: #5a2320; color: #f09a92; }
+  .tag.unk { background: #5a4a1f; color: #e8cf7e; }
+  .tag.lock { background: #27415f; color: #8fc0f5; }
+  .msg { border-radius: 5px; padding: 8px 10px; font-size: 13px; margin-bottom: 10px; white-space: pre-wrap; line-height: 1.5; }
+  .msg.ok { background: #1e3a28; border: 1px solid #3c7a4f; }
+  .msg.err { background: #3d201d; border: 1px solid #8a3d34; }
+  .msg.info { background: #20304a; border: 1px solid #3d5e8a; }
+  .msg ul { margin: 4px 0 0; padding-left: 18px; }
+  .muted { color: #8b919c; font-size: 12px; }
+  .route-item { cursor: pointer; }
+  .route-item:hover { background: #323845; }
+  .chip { font-size: 11px; background: #1a1d24; border: 1px solid #444a57; border-radius: 3px; padding: 1px 6px; }
+  .legend { position: absolute; left: 12px; bottom: 10px; background: rgba(26,29,36,.85); border: 1px solid #3a3f4b; border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.9; }
+  .legend i { display: inline-block; width: 22px; height: 4px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+  .event-log { font-family: Consolas, monospace; font-size: 12px; max-height: 150px; overflow-y: auto; background: #1a1d24; border: 1px solid #3a3f4b; border-radius: 4px; padding: 6px; }
+  .event-log div { padding: 1px 0; }
+  .multi select { width: 100%; height: 90px; }
+  .sw-req { background: #1a1d24; border: 1px solid #3a3f4b; border-radius: 4px; padding: 6px; margin-bottom: 6px; font-size: 12px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🚦 站场进路联锁推演台</h1>
+  <div class="tabs">
+    <button id="tab-op" class="active" onclick="switchTab('op')">值班员</button>
+    <button id="tab-admin" onclick="switchTab('admin')">管理员</button>
+  </div>
+  <div class="operator-bar">
+    <span>值班员姓名</span>
+    <input id="operator" placeholder="值班员">
+  </div>
+</header>
+
+<main>
+  <div class="board">
+    <svg id="svg" viewBox="0 0 760 420" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="legend">
+      <div><i style="background:#6b7280"></i>无岔连接线</div>
+      <div><i style="background:#d9a441"></i>道岔定位连接　<i style="background:#c76fe0"></i>道岔反位连接</div>
+      <div><i style="background:#4cc36b"></i>进路锁闭区段　<i style="background:#e0564c"></i>占用　<span style="color:#e8cf7e">▮</span> 状态未知</div>
+      <div>🟢 允许信号　🔴 停车信号</div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel"></div>
+</main>
+
+<script>
+'use strict';
+// ============================ 全局状态 ============================
+let state = null;
+let tab = 'op';
+let selected = null;                 // {kind:'section'|'switch'|'signal'|'route', id}
+let currentRouteId = null;           // 值班员当前选中的进路
+let adminToken = localStorage.getItem('adminToken') || '';
+let lastMsg = null;                  // {type, html}
+let pollTimer = null;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+const $ = (id) => document.getElementById(id);
+const operatorName = () => $('operator').value.trim() || '值班员';
+$('operator').value = localStorage.getItem('operator') || '';
+$('operator').onchange = () => localStorage.setItem('operator', $('operator').value);
+
+async function api(method, url, body) {
+  const opt = { method, headers: { 'Content-Type': 'application/json' } };
+  if (tab === 'admin' && adminToken) opt.headers['x-admin-token'] = adminToken;
+  if (body !== undefined) opt.body = JSON.stringify(body);
+  const res = await fetch(url, opt);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) {
+      const t = prompt('需要管理员口令：');
+      if (t === null) throw data;
+      adminToken = t; localStorage.setItem('adminToken', t);
+      return api(method, url, body);
+    }
+    throw data;
+  }
+  return data;
+}
+
+function showMsg(type, html) { lastMsg = { type, html }; renderPanel(); }
+function clearMsg() { lastMsg = null; }
+
+function reasonsHtml(err) {
+  const d = err.details || {};
+  const lines = [];
+  if (Array.isArray(d.reasons)) {
+    d.reasons.forEach((r) => {
+      lines.push('<li>' + esc(r.message) + '</li>');
+      (r.sections || []).forEach((s) => lines.push('<li>　└ ' + esc(s.message) + '</li>'));
+      (r.conflicts || []).forEach((c) => lines.push('<li>　└ ' + esc(c.message) + '</li>'));
+    });
+  }
+  if (Array.isArray(d.problems)) d.problems.forEach((p) => lines.push('<li>' + esc(p) + '</li>'));
+  if (d.section_id) {
+    const extra = [];
+    if (d.expected) extra.push('期望序号 ' + d.expected + '，收到 ' + d.received);
+    if (d.existing) extra.push('已提交: ' + d.existing + '，本次: ' + d.submitted);
+    if (d.last_seq) extra.push('最新序号 ' + d.last_seq);
+    lines.push('<li>涉及区段: ' + esc(d.section_id) + (extra.length ? '（' + extra.join('；') + '）' : '') + '</li>');
+  }
+  return esc(err.message || '操作失败') + (lines.length ? '<ul>' + lines.join('') + '</ul>' : '');
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// ============================ 轮询 / 刷新 ============================
+async function refresh(silent) {
+  try {
+    state = await api('GET', '/api/state');
+    renderAll();
+  } catch (e) { if (!silent) showMsg('err', reasonsHtml(e)); }
+}
+function switchTab(t) {
+  tab = t;
+  $('tab-op').classList.toggle('active', t === 'op');
+  $('tab-admin').classList.toggle('active', t === 'admin');
+  selected = null; clearMsg();
+  renderAll();
+}
+
+// ============================ SVG 站场图 ============================
+function el(name, attrs, parent) {
+  const n = document.createElementNS(SVG_NS, name);
+  Object.entries(attrs || {}).forEach(([k, v]) => n.setAttribute(k, v));
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function pt(id) {
+  const s = state.sections.find((x) => x.id === id);
+  return s ? { x: s.x, y: s.y } : null;
+}
+function swPt(id) {
+  const s = state.switches.find((x) => x.id === id);
+  return s ? { x: s.x, y: s.y } : null;
+}
+
+function renderSvg() {
+  const svg = $('svg');
+  svg.innerHTML = '';
+
+  // 1) 无岔直连边：相邻出现在某进路区段序列中、且没有道岔连接的两段
+  const linkedPairKeys = new Set();
+  state.links.forEach((l) => linkedPairKeys.add(key(l.section_a, l.section_b)));
+  const plainPairs = new Set();
+  state.routes.forEach((r) => {
+    for (let i = 0; i < r.sections.length - 1; i++) {
+      const k = key(r.sections[i], r.sections[i + 1]);
+      if (!linkedPairKeys.has(k)) plainPairs.add(k);
+    }
+  });
+  plainPairs.forEach((k) => {
+    const [a, b] = k.split('|');
+    const pa = pt(a), pb = pt(b);
+    if (pa && pb) el('line', { x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y, stroke: '#6b7280', 'stroke-width': 5, 'stroke-linecap': 'round' }, svg);
+  });
+
+  // 2) 道岔连接线（折线经道岔坐标）
+  state.links.forEach((l) => {
+    const pa = pt(l.section_a), pb = pt(l.section_b), ps = swPt(l.switch_id);
+    if (!pa || !pb || !ps) return;
+    const color = l.position === 'normal' ? '#d9a441' : '#c76fe0';
+    el('polyline', {
+      points: `${pa.x},${pa.y} ${ps.x},${ps.y} ${pb.x},${pb.y}`,
+      fill: 'none', stroke: color, 'stroke-width': 4, 'stroke-linejoin': 'round',
+      'stroke-dasharray': l.position === 'reverse' ? '8 5' : 'none', opacity: .85,
+    }, svg);
+  });
+
+  // 3) 开放进路高亮（锁闭区段上的粗绿线）
+  state.actives.forEach((a) => {
+    const route = state.routes.find((r) => r.id === a.route_id);
+    if (!route) return;
+    const locked = new Set(a.locked_sections);
+    for (let i = 0; i < route.sections.length - 1; i++) {
+      const s1 = route.sections[i], s2 = route.sections[i + 1];
+      if (!locked.has(s1) || !locked.has(s2)) continue;
+      const pa = pt(s1), pb = pt(s2);
+      if (!pa || !pb) continue;
+      const via = state.links.find((l) =>
+        (key(l.section_a, l.section_b) === key(s1, s2)) &&
+        a.locked_switches.some((w) => w.switch_id === l.switch_id && w.position === l.position));
+      if (via) {
+        const ps = swPt(via.switch_id);
+        el('polyline', { points: `${pa.x},${pa.y} ${ps.x},${ps.y} ${pb.x},${pb.y}`, fill: 'none', stroke: '#4cc36b', 'stroke-width': 9, opacity: .35, 'stroke-linejoin': 'round' }, svg);
+      } else {
+        el('line', { x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y, stroke: '#4cc36b', 'stroke-width': 9, opacity: .35, 'stroke-linecap': 'round' }, svg);
+      }
+    }
+  });
+
+  // 4) 区段
+  state.sections.forEach((s) => {
+    const g = el('g', { transform: `translate(${s.x},${s.y})`, style: 'cursor:pointer' }, svg);
+    const fill = s.occupied === null ? '#7a6620' : s.occupied ? '#7a3029' : '#2c5e3a';
+    el('rect', { x: -26, y: -15, width: 52, height: 30, rx: 5, fill, stroke: isSel('section', s.id) ? '#fff' : '#0c0e12', 'stroke-width': isSel('section', s.id) ? 2 : 1 }, g);
+    const t = el('text', { x: 0, y: 4, 'text-anchor': 'middle', 'font-size': 13, fill: '#fff', 'pointer-events': 'none' }, g);
+    t.textContent = s.id;
+    g.addEventListener('click', () => selectItem('section', s.id));
+    makeDraggable(g, s, 'section');
+  });
+
+  // 5) 道岔
+  state.switches.forEach((w) => {
+    const lockedBy = state.actives.find((a) => a.locked_switches.some((x) => x.switch_id === w.id));
+    const g = el('g', { transform: `translate(${w.x},${w.y})`, style: 'cursor:pointer' }, svg);
+    el('polygon', { points: '0,-11 11,9 -11,9', fill: lockedBy ? '#27518f' : '#4a5060', stroke: isSel('switch', w.id) ? '#fff' : '#0c0e12', 'stroke-width': 1 }, g);
+    const t = el('text', { x: 0, y: 20, 'text-anchor': 'middle', 'font-size': 11, fill: '#cfd3da', 'pointer-events': 'none' }, g);
+    t.textContent = w.id + (lockedBy ? ' ' + (lockedBy.locked_switches.find((x) => x.switch_id === w.id).position === 'normal' ? '定' : '反') : '');
+    g.addEventListener('click', () => selectItem('switch', w.id));
+    makeDraggable(g, w, 'switch');
+  });
+
+  // 6) 信号机
+  state.signals.forEach((g0) => {
+    const g = el('g', { transform: `translate(${g0.x},${g0.y})`, style: 'cursor:pointer' }, svg);
+    el('circle', { r: 10, fill: '#14171d', stroke: isSel('signal', g0.id) ? '#fff' : '#555c6b', 'stroke-width': 1.5 }, g);
+    el('circle', { r: 6, fill: g0.aspect === 'green' ? '#33d17a' : '#e0322e' }, g);
+    const t = el('text', { x: 0, y: -15, 'text-anchor': 'middle', 'font-size': 11, fill: '#cfd3da', 'pointer-events': 'none' }, g);
+    t.textContent = g0.id;
+    g.addEventListener('click', () => selectItem('signal', g0.id));
+    makeDraggable(g, g0, 'signal');
+  });
+}
+
+function key(a, b) { return [a, b].sort().join('|'); }
+function isSel(kind, id) { return selected && selected.kind === kind && selected.id === id; }
+function selectItem(kind, id) { selected = { kind, id }; clearMsg(); renderAll(); }
+
+// 管理员模式下可拖拽图元，落位后保存坐标
+function makeDraggable(g, obj, kind) {
+  if (tab !== 'admin') return;
+  let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  let moved = false;
+  g.addEventListener('pointerdown', (e) => {
+    dragging = true; moved = false;
+    const p = svgPoint(e);
+    sx = p.x; sy = p.y; ox = obj.x; oy = obj.y;
+    g.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+  });
+  g.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const p = svgPoint(e);
+    const nx = Math.round(ox + p.x - sx), ny = Math.round(oy + p.y - sy);
+    if (Math.abs(nx - ox) + Math.abs(ny - oy) > 2) moved = true;
+    obj.x = nx; obj.y = ny;
+    g.setAttribute('transform', `translate(${nx},${ny})`);
+  });
+  g.addEventListener('pointerup', () => {
+    if (!dragging) return;
+    dragging = false;
+    if (moved) {
+      const url = kind === 'section' ? `/api/admin/sections/${obj.id}/layout`
+        : kind === 'switch' ? `/api/admin/switches/${obj.id}/layout`
+        : kind === 'signal' ? `/api/admin/signals/${obj.id}/layout`
+        : null;
+      if (url) api('POST', url, { x: obj.x, y: obj.y }).then(() => refresh(true)).catch((e) => showMsg('err', reasonsHtml(e)));
+      else renderAll();
+    }
+  });
+}
+function svgPoint(e) {
+  const r = $('svg').getBoundingClientRect();
+  const vb = $('svg').viewBox.baseVal;
+  return { x: (e.clientX - r.left) / r.width * vb.width, y: (e.clientY - r.top) / r.height * vb.height };
+}
+
+// ============================ 右侧面板 ============================
+function renderAll() { renderSvg(); renderPanel(); }
+
+function renderPanel() {
+  const p = $('panel');
+  if (!state) { p.innerHTML = '<div class="muted">加载中…</div>'; return; }
+  let html = '';
+  if (lastMsg) html += `<div class="msg ${lastMsg.type}">${lastMsg.html}</div>`;
+  html += tab === 'op' ? opPanel() : adminPanel();
+  p.innerHTML = html;
+  bindPanelEvents();
+}
+
+function occTag(s) {
+  if (s.occupied === null) return '<span class="tag unk">未知·按占用</span>';
+  return s.occupied ? '<span class="tag occ">占用</span>' : '<span class="tag free">空闲</span>';
+}
+
+// ---------- 值班员面板 ----------
+function opPanel() {
+  let h = '<h2>进路选择与开放</h2>';
+  if (!currentRouteId && state.routes.length) currentRouteId = state.routes[0].id;
+  const route = state.routes.find((r) => r.id === currentRouteId) || state.routes[0];
+  if (route) currentRouteId = route.id;
+  h += '<div class="row"><label>进路</label><select id="op-route" style="flex:1">' +
+    state.routes.map((r) => `<option value="${r.id}" ${route && route.id === r.id ? 'selected' : ''}>${esc(r.id)} ${esc(r.name)}</option>`).join('') +
+    '</select></div>';
+
+  if (route) {
+    h += '<div class="card"><div class="muted">经过区段（顺序）</div><div style="margin:4px 0">' +
+      route.sections.map((s) => `<span class="chip">${s}</span>`).join(' → ') + '</div>' +
+      '<div class="muted">道岔位置要求</div><div style="margin-top:4px">' +
+      route.switches.map((s) => `<span class="chip">${s.switch_id}: ${s.position === 'normal' ? '定位' : '反位'}</span>`).join('　') +
+      '</div></div>';
+
+    h += '<h3>确认道岔位置</h3><div class="card">';
+    if (!route.switches.length) h += '<div class="muted">该进路无道岔</div>';
+    route.switches.forEach((s, i) => {
+      h += `<div class="row"><label>${esc(s.switch_id)}</label>
+        <select data-sw="${esc(s.switch_id)}" data-req="${s.position}" class="sw-pos">
+          <option value="">未操作</option>
+          <option value="normal" ${s.position === 'normal' ? 'selected' : ''}>定位</option>
+          <option value="reverse" ${s.position === 'reverse' ? 'selected' : ''}>反位</option>
+        </select><span class="muted">要求：${s.position === 'normal' ? '定位' : '反位'}</span></div>`;
+    });
+    h += '</div>';
+    h += `<button class="act" id="btn-open">申请开放进路</button>`;
+  }
+
+  // 活动进路
+  h += '<h2 style="margin-top:18px">已开放进路 / 信号状态</h2>';
+  if (!state.actives.length) h += '<div class="muted">当前无开放进路，全部信号机显示红灯</div>';
+  state.actives.forEach((a) => {
+    const r = state.routes.find((x) => x.id === a.route_id);
+    const sig = state.signals.find((x) => x.id === (r && r.from_signal));
+    h += `<div class="card">
+      <div><b>${esc(r ? r.name : a.route_id)}</b> <span class="muted">#${a.active_id} · ${esc(a.operator)}</span></div>
+      <div style="margin:5px 0">信号 ${sig ? esc(sig.id) : '?'}：${a.entered
+        ? '<span style="color:#f08a84">🔴 红灯（列车已进入首段，信号自动回红）</span>'
+        : '<span style="color:#7ee29a">🟢 绿灯（允许发车）</span>'}</div>
+      <div style="font-size:12px;line-height:1.7">
+        锁闭区段：${a.locked_sections.map((s) => `<span class="tag lock">${s}</span>`).join('') || '<span class="muted">无（已逐段解锁）</span>'}<br>
+        已解锁：${a.released_sections.map((s) => `<span class="chip">${s}</span>`).join(' ') || '<span class="muted">—</span>'}<br>
+        锁闭道岔：${a.locked_switches.map((s) => `<span class="chip">${s.switch_id}:${s.position === 'normal' ? '定' : '反'}</span>`).join(' ')}
+      </div>
+      <div class="row" style="margin-top:6px;margin-bottom:0">
+        <button class="act ghost" data-release="${a.active_id}">${a.entered ? '解除整条进路（末段清空后）' : '取消进路（列车未进入）'}</button>
+      </div></div>`;
+  });
+
+  // 区段占用图与事件
+  h += '<h2>区段占用 / 清空事件</h2><div class="card">';
+  state.sections.forEach((s) => {
+    h += `<div class="row" style="margin-bottom:4px">
+      <label>${esc(s.id)}</label>${occTag(s)}
+      <span class="muted">下一序号 ${s.next_seq}</span>
+      <span style="flex:1"></span>
+      <button class="act ghost" style="padding:2px 10px" data-occupy="${s.id}" data-seq="${s.next_seq}">占用 #${s.next_seq}</button>
+      <button class="act ghost" style="padding:2px 10px" data-clear="${s.id}" data-seq="${s.next_seq}">清空 #${s.next_seq}</button>
+    </div>`;
+  });
+  h += '<div class="row" style="margin-top:6px"><label>自定义</label>' +
+    '<input type="text" id="ev-section" placeholder="区段" style="width:70px;flex:none">' +
+    '<input type="number" id="ev-seq" placeholder="序号" style="width:65px;flex:none" min="1">' +
+    '<select id="ev-value"><option value="occupy">占用</option><option value="clear">清空</option></select>' +
+    '<button class="act" id="btn-event">提交事件</button></div>';
+  h += '<div class="muted" style="margin-top:4px">提示：同号同内容重传不重复生效；同号异内容、跳号将被拒绝。状态未知区段按占用处理。</div>';
+  h += '</div>';
+
+  h += '<h3>最近事件</h3><div class="event-log">' +
+    (state.events.length ? state.events.slice(-12).reverse().map((e) =>
+      `<div>#${e.seq} ${esc(e.section_id)} ${e.value === 'occupy' ? '🔴占用' : '🟢清空'}</div>`).join('')
+      : '<div class="muted">暂无</div>') + '</div>';
+  return h;
+}
+
+async function openSelectedRoute() {
+  const sel = $('op-route'); if (!sel) return;
+  const positions = {};
+  document.querySelectorAll('.sw-pos').forEach((n) => { positions[n.dataset.sw] = n.value; });
+  try {
+    const r = await api('POST', `/api/routes/${sel.value}/open`, { positions, operator: operatorName() });
+    showMsg('ok', '✅ ' + esc(r.route_name) + ' 已锁闭并开放，起点信号显示绿灯');
+  } catch (e) { showMsg('err', '⛔ ' + reasonsHtml(e)); }
+  refresh();
+}
+
+async function submitEvent(sectionId, seq, value) {
+  try {
+    const r = await api('POST', '/api/events', { section_id: sectionId, seq, value });
+    let m = `${r.duplicated ? 'ℹ️' : '✅'} 区段 ${r.section_id} #${r.seq} ${r.value === 'occupy' ? '占用' : '清空'}` +
+      (r.duplicated ? '（同号同内容重传，未重复生效）' : ' 已生效');
+    if (r.signal_turned_red) m += '\n信号已自动回红';
+    if (r.released_sections && r.released_sections.length) m += '\n逐段解锁：' + r.released_sections.join('、');
+    showMsg(r.duplicated ? 'info' : 'ok', esc(m).replace(/\n/g, '<br>'));
+  } catch (e) { showMsg('err', '⛔ ' + reasonsHtml(e)); }
+  refresh();
+}
+
+// ---------- 管理员面板 ----------
+function adminPanel() {
+  let h = '<h2>站场配置</h2>';
+  h += `<div class="row">
+    <button class="act ghost" data-add="section">+ 区段</button>
+    <button class="act ghost" data-add="switch">+ 道岔</button>
+    <button class="act ghost" data-add="signal">+ 信号机</button>
+    <button class="act ghost" data-add="route">+ 进路</button>
+    <button class="act danger" id="btn-reset">复位运行时</button>
+  </div>`;
+
+  if (selected) {
+    if (selected.kind === 'section') h += sectionEditor();
+    if (selected.kind === 'switch') h += switchEditor();
+    if (selected.kind === 'signal') h += signalEditor();
+    if (selected.kind === 'route') h += routeEditor();
+    if (selected.kind === 'add-section') h += sectionEditor(null);
+    if (selected.kind === 'add-switch') h += switchEditor(null);
+    if (selected.kind === 'add-signal') h += signalEditor(null);
+    if (selected.kind === 'add-route') h += routeEditor(null);
+  } else {
+    h += '<div class="muted">在图上点击图元编辑，或用上方按钮新增。管理员模式下可拖动区段/道岔调整布置。</div>';
+  }
+
+  h += '<h3>区段</h3>' + state.sections.map((s) =>
+    `<div class="card route-item ${isSel('section', s.id) ? 'selected' : ''}" data-pick="section:${s.id}">
+      <b>${esc(s.id)}</b> ${occTag(s)}${s.locked_by ? '<span class="tag lock">锁闭</span>' : ''}
+      <div class="muted">${esc(s.name)}</div></div>`).join('');
+
+  h += '<h3>道岔与连接</h3>' + state.switches.map((w) => {
+    const ls = state.links.filter((l) => l.switch_id === w.id);
+    return `<div class="card route-item ${isSel('switch', w.id) ? 'selected' : ''}" data-pick="switch:${w.id}">
+      <b>${esc(w.id)}</b> <span class="muted">${esc(w.name)}</span><br>
+      <span class="muted" style="font-size:11px">定位: ${ls.find((l) => l.position === 'normal') ? esc(ls.find((l) => l.position === 'normal').section_a) + '↔' + esc(ls.find((l) => l.position === 'normal').section_b) : '未定义'}；
+      反位: ${ls.find((l) => l.position === 'reverse') ? esc(ls.find((l) => l.position === 'reverse').section_a) + '↔' + esc(ls.find((l) => l.position === 'reverse').section_b) : '未定义'}</span></div>`;
+  }).join('');
+
+  h += '<h3>信号机</h3>' + state.signals.map((g) =>
+    `<div class="card route-item ${isSel('signal', g.id) ? 'selected' : ''}" data-pick="signal:${g.id}">
+      <b>${g.aspect === 'green' ? '🟢' : '🔴'} ${esc(g.id)}</b> <span class="muted">${esc(g.name)}</span>
+      <div class="muted" style="font-size:11px">关联区段: ${esc(g.section_id || '无')}</div></div>`).join('');
+
+  h += '<h3>进路定义</h3>' + state.routes.map((r) =>
+    `<div class="card route-item ${isSel('route', r.id) ? 'selected' : ''}" data-pick="route:${r.id}">
+      <b>${esc(r.id)}</b> ${esc(r.name)}<br>
+      <span class="muted" style="font-size:11px">${esc(r.from_signal)}→${esc(r.to_signal)}；区段 ${r.sections.join(',') || '无'}；道岔 ${r.switches.map((s) => s.switch_id + (s.position === 'normal' ? '定' : '反')).join(',') || '无'}</span></div>`).join('');
+  return h;
+}
+
+function sectionEditor(s0) {
+  const s = s0 || { id: '', name: '', x: 120, y: 120 };
+  return `<h2>${s0 ? '编辑区段' : '新增区段'}</h2><div class="card">
+    <div class="row"><label>标识</label><input type="text" id="f-id" value="${esc(s.id)}" ${s0 ? 'disabled' : ''} placeholder="如 6G"></div>
+    <div class="row"><label>名称</label><input type="text" id="f-name" value="${esc(s.name)}"></div>
+    <div class="row"><label>坐标</label><input type="number" id="f-x" value="${s.x}" style="width:80px"><input type="number" id="f-y" value="${s.y}" style="width:80px"></div>
+    <div class="row"><button class="act" data-save="section">保存</button>${s0 ? '<button class="act danger" data-del="section">删除</button>' : ''}</div></div>`;
+}
+function switchEditor(w0) {
+  const w = w0 || { id: '', name: '', x: 200, y: 120 };
+  const links = w0 ? state.links.filter((l) => l.switch_id === w.id) : [];
+  const norm = links.find((l) => l.position === 'normal') || { section_a: '', section_b: '' };
+  const rev = links.find((l) => l.position === 'reverse') || { section_a: '', section_b: '' };
+  const opts = state.sections.map((s) => s.id);
+  const sel = (v) => opts.map((o) => `<option value="${o}" ${o === v ? 'selected' : ''}>${o}</option>`).join('');
+  return `<h2>${w0 ? '编辑道岔' : '新增道岔'}</h2><div class="card">
+    <div class="row"><label>标识</label><input type="text" id="f-id" value="${esc(w.id)}" ${w0 ? 'disabled' : ''} placeholder="如 SW3"></div>
+    <div class="row"><label>名称</label><input type="text" id="f-name" value="${esc(w.name)}"></div>
+    <div class="row"><label>坐标</label><input type="number" id="f-x" value="${w.x}" style="width:80px"><input type="number" id="f-y" value="${w.y}" style="width:80px"></div>
+    <div class="row"><button class="act" data-save="switch">保存</button>${w0 ? '<button class="act danger" data-del="switch">删除</button>' : ''}</div></div>
+    ${w0 ? `<h3>定位连接</h3><div class="card row">
+      <select id="lk-n-a"><option value="">区段</option>${sel(norm.section_a)}</select> ↔
+      <select id="lk-n-b"><option value="">区段</option>${sel(norm.section_b)}</select>
+      <button class="act" data-link="normal">保存定位</button></div>
+    <h3>反位连接</h3><div class="card row">
+      <select id="lk-r-a"><option value="">区段</option>${sel(rev.section_a)}</select> ↔
+      <select id="lk-r-b"><option value="">区段</option>${sel(rev.section_b)}</select>
+      <button class="act" data-link="reverse">保存反位</button></div>` : ''}`;
+}
+function signalEditor(g0) {
+  const g = g0 || { id: '', name: '', section_id: '', x: 120, y: 60 };
+  return `<h2>${g0 ? '编辑信号机' : '新增信号机'}</h2><div class="card">
+    <div class="row"><label>标识</label><input type="text" id="f-id" value="${esc(g.id)}" ${g0 ? 'disabled' : ''} placeholder="如 X5"></div>
+    <div class="row"><label>名称</label><input type="text" id="f-name" value="${esc(g.name)}"></div>
+    <div class="row"><label>关联区段</label><select id="f-sec"><option value="">无</option>${state.sections.map((s) => `<option value="${s.id}" ${s.id === g.section_id ? 'selected' : ''}>${s.id}</option>`).join('')}</select></div>
+    <div class="row"><label>坐标</label><input type="number" id="f-x" value="${g.x}" style="width:80px"><input type="number" id="f-y" value="${g.y}" style="width:80px"></div>
+    <div class="row"><button class="act" data-save="signal">保存</button>${g0 ? '<button class="act danger" data-del="signal">删除</button>' : ''}</div></div>`;
+}
+function routeEditor(r0) {
+  const r = r0 || { id: '', name: '', from_signal: '', to_signal: '', sections: [], switches: [] };
+  const sigOpts = state.signals.map((g) => `<option value="${g.id}" ${g.id === r.from_signal ? 'selected' : ''}>${g.id}</option>`).join('');
+  const sigOpts2 = state.signals.map((g) => `<option value="${g.id}" ${g.id === r.to_signal ? 'selected' : ''}>${g.id}</option>`).join('');
+  return `<h2>${r0 ? '编辑进路' : '新增进路'}</h2><div class="card">
+    <div class="row"><label>标识</label><input type="text" id="f-id" value="${esc(r.id)}" ${r0 ? 'disabled' : ''} placeholder="如 R4"></div>
+    <div class="row"><label>名称</label><input type="text" id="f-name" value="${esc(r.name)}"></div>
+    <div class="row"><label>起点</label><select id="f-from"><option value="">选择信号机</option>${sigOpts}</select></div>
+    <div class="row"><label>终点</label><select id="f-to"><option value="">选择信号机</option>${sigOpts2}</select></div>
+    <label>经过区段（按顺序点选，再次点击移除）</label>
+    <div class="row" id="f-secs">${state.sections.map((s) =>
+      `<button type="button" class="act ghost sec-toggle" data-id="${s.id}" style="padding:3px 10px;${r.sections.includes(s.id) ? 'background:#3d7cdd' : ''}">${s.id}</button>`).join('')}</div>
+    <div class="muted">当前顺序：<span id="f-secs-order">${r.sections.join(' → ') || '无'}</span></div>
+    <label style="margin-top:8px;display:block">道岔位置要求</label>
+    <div id="f-swrs">${state.switches.map((w) => {
+      const cur = r.switches.find((x) => x.switch_id === w.id);
+      return `<div class="sw-req">${esc(w.id)}
+        <label class="muted"><input type="checkbox" class="swr-en" data-id="${w.id}" ${cur ? 'checked' : ''}> 纳入</label>
+        <select class="swr-pos" data-id="${w.id}"><option value="normal" ${cur && cur.position === 'normal' ? 'selected' : ''}>定位</option><option value="reverse" ${cur && cur.position === 'reverse' ? 'selected' : ''}>反位</option></select></div>`;
+    }).join('')}</div>
+    <div class="row"><button class="act" data-save="route">保存（含拓扑校验）</button>${r0 ? '<button class="act danger" data-del="route">删除</button>' : ''}</div></div>`;
+}
+
+// 面板事件绑定（每次 innerHTML 重建后重新绑定）
+function bindPanelEvents() {
+  document.querySelectorAll('[data-pick]').forEach((n) => n.onclick = () => {
+    const [kind, id] = n.dataset.pick.split(':');
+    selectItem(kind, id);
+  });
+  document.querySelectorAll('[data-add]').forEach((n) => n.onclick = () => {
+    selected = { kind: 'add-' + n.dataset.add }; clearMsg(); renderAll();
+  });
+  const btn = $('btn-open'); if (btn) btn.onclick = openSelectedRoute;
+  const routeSel = $('op-route');
+  if (routeSel) routeSel.onchange = () => { currentRouteId = routeSel.value; renderAll(); };
+  document.querySelectorAll('[data-occupy]').forEach((n) => n.onclick = () => submitEvent(n.dataset.occupy, parseInt(n.dataset.seq, 10), 'occupy'));
+  document.querySelectorAll('[data-clear]').forEach((n) => n.onclick = () => submitEvent(n.dataset.clear, parseInt(n.dataset.seq, 10), 'clear'));
+  const be = $('btn-event');
+  if (be) be.onclick = () => {
+    const sid = $('ev-section').value.trim(), seq = parseInt($('ev-seq').value, 10), v = $('ev-value').value;
+    if (!sid || !seq) return showMsg('err', '请填写区段与序号');
+    submitEvent(sid, seq, v);
+  };
+  document.querySelectorAll('[data-release]').forEach((n) => n.onclick = async () => {
+    try {
+      const r = await api('POST', `/api/active/${n.dataset.release}/release`, { operator: operatorName() });
+      showMsg('ok', '✅ ' + esc(r.message));
+    } catch (e) { showMsg('err', '⛔ ' + reasonsHtml(e)); }
+    refresh();
+  });
+  const rst = $('btn-reset');
+  if (rst) rst.onclick = async () => {
+    if (!confirm('确认清空全部锁闭、占用事件与状态？（站场定义保留）')) return;
+    try { const r = await api('POST', '/api/admin/reset-runtime'); showMsg('ok', esc(r.message)); }
+    catch (e) { showMsg('err', reasonsHtml(e)); }
+    refresh();
+  };
+  bindAdminEditors();
+}
+
+function bindAdminEditors() {
+  document.querySelectorAll('[data-save]').forEach((n) => n.onclick = async () => {
+    const kind = n.dataset.save;
+    try {
+      if (kind === 'section') {
+        const body = { id: $('f-id').value.trim(), name: $('f-name').value, x: +$('f-x').value, y: +$('f-y').value };
+        const isNew = !$('f-id').disabled;
+        await api('POST', '/api/admin/sections', body);
+        selected = { kind: 'section', id: body.id };
+      } else if (kind === 'switch') {
+        const body = { id: $('f-id').value.trim(), name: $('f-name').value, x: +$('f-x').value, y: +$('f-y').value };
+        await api('POST', '/api/admin/switches', body);
+        selected = { kind: 'switch', id: body.id };
+      } else if (kind === 'signal') {
+        const body = { id: $('f-id').value.trim(), name: $('f-name').value, section_id: $('f-sec').value, x: +$('f-x').value, y: +$('f-y').value };
+        await api('POST', '/api/admin/signals', body);
+        selected = { kind: 'signal', id: body.id };
+      } else if (kind === 'route') {
+        const sections = routeDraftSections.slice();
+        const switches = [...document.querySelectorAll('.swr-en')].filter((c) => c.checked)
+          .map((c) => ({ switch_id: c.dataset.id, position: document.querySelector(`.swr-pos[data-id="${c.dataset.id}"]`).value }));
+        const body = { id: $('f-id').value.trim(), name: $('f-name').value, from_signal: $('f-from').value, to_signal: $('f-to').value, sections, switches };
+        await api('POST', '/api/admin/routes', body);
+        selected = { kind: 'route', id: body.id };
+      }
+      clearMsg(); refresh(true);
+    } catch (e) { showMsg('err', reasonsHtml(e)); }
+  });
+  document.querySelectorAll('[data-del]').forEach((n) => n.onclick = async () => {
+    const kind = n.dataset.del;
+    if (!confirm('确认删除？')) return;
+    const id = selected.id;
+    try {
+      await api('DELETE', `/api/admin/${kind === 'section' ? 'sections' : kind === 'switch' ? 'switches' : kind === 'signal' ? 'signals' : 'routes'}/${id}`);
+      selected = null; clearMsg(); refresh(true);
+    } catch (e) { showMsg('err', reasonsHtml(e)); }
+  });
+  document.querySelectorAll('[data-link]').forEach((n) => n.onclick = async () => {
+    const pos = n.dataset.link;
+    const a = $('lk-' + (pos === 'normal' ? 'n' : 'r') + '-a').value;
+    const b = $('lk-' + (pos === 'normal' ? 'n' : 'r') + '-b').value;
+    try {
+      await api('POST', '/api/admin/switch-links', { switch_id: selected.id, position: pos, section_a: a, section_b: b });
+      clearMsg(); refresh(true);
+    } catch (e) { showMsg('err', reasonsHtml(e)); }
+  });
+  // 进路区段顺序点选
+  const cur = selected && selected.kind === 'route' ? (state.routes.find((r) => r.id === selected.id) || { sections: [] }) : null;
+  routeDraftSections = cur ? cur.sections.slice() : [];
+  document.querySelectorAll('.sec-toggle').forEach((b) => b.onclick = () => {
+    const id = b.dataset.id;
+    const i = routeDraftSections.indexOf(id);
+    if (i >= 0) { routeDraftSections.splice(i, 1); b.style.background = ''; }
+    else { routeDraftSections.push(id); b.style.background = '#3d7cdd'; }
+    $('f-secs-order').textContent = routeDraftSections.join(' → ') || '无';
+  });
+}
+let routeDraftSections = [];
+
+// ============================ 启动 ============================
+refresh();
+pollTimer = setInterval(() => refresh(true), 2000);
+</script>
+</body>
+</html>
